@@ -135,11 +135,13 @@ function varargout=runme(varargin)
 	% }}}
 
 	%Load some necessary codes {{{
-	glacier = 'Jakobshavn_Basin'; hem='n';
+	glacier = 'NEGIS'; hem='n';
 
-	addpath(['/totten_1/chenggong/', glacier, '/PostProcessing/']);
-	addpath(['/totten_1/chenggong/', glacier, '/src/']);
-	projPath = ['/totten_1/chenggong/', glacier, '/'];
+	rootFolder = '/Users/chenggong/Research/';
+
+	addpath(genpath([rootFolder, glacier, '/PostProcessing/']))
+	addpath(genpath([rootFolder, glacier, '/src/']))
+	projPath = [rootFolder, glacier, '/'];
 	% }}}
 	%Cluster parameters{{{
 	if strcmpi(clustername, 'andes')
@@ -202,13 +204,13 @@ function varargout=runme(varargin)
 		[velx, vely]=interpJoughinCompositeGreenland(md.mesh.x,md.mesh.y);
 		vel  = sqrt(velx.^2+vely.^2);
 
-		h=NaN*ones(md.mesh.numberofvertices,1);
-		in=ContourToNodes(md.mesh.x,md.mesh.y,[projPath, '/Exp/refinement.exp'],1);
-		h(find(in)) = 200;
+		%h=NaN*ones(md.mesh.numberofvertices,1);
+		%in=ContourToNodes(md.mesh.x,md.mesh.y,[projPath, '/Exp/refinement.exp'],1);
+		%h(find(in)) = 200;
 
 		%refine mesh using surface velocities as metric
 		if strcmp(hem,'n')
-			md=bamg(md,'hmin',100,'hmax',2500,'field',vel,'err',5, 'hVertices', h);
+			md=bamg(md,'hmin',100,'hmax',5000,'field',vel,'err',5, 'gradation', 2);%, 'hVertices', h);
 			[md.mesh.lat,md.mesh.long]  = xy2ll(md.mesh.x,md.mesh.y,+1,45,70);
 			md.mesh.epsg=3413;
 		else
@@ -256,7 +258,9 @@ function varargout=runme(varargin)
 		md.miscellaneous.name = glacier;
 
 		% add damage on the shear margin {{{
-		if(damageType == 1),
+		if (damageType == 0)
+			disp([' No damage to shear margin']);
+		elseif(damageType == 1),
 			maxEffStrain = 2;
 			md=mechanicalproperties(md,md.inversion.vx_obs,md.inversion.vy_obs);
 			pos=md.mesh.elements(md.results.strainrate.effectivevalue>maxEffStrain);
@@ -266,8 +270,6 @@ function varargout=runme(varargin)
 			damage(md.mask.ice_levelset>=0) = 1;
 			md.materials.rheology_B=1./((damage).^(1/3)).*md.materials.rheology_B;
 			disp([' Add damage to shear margin']);
-		elseif (damageType == 0)
-			disp([' No damage to shear margin']);
 		elseif (damageType == 2)
 			disp([' Add damage to shear margin, determined by strainrate and velocity threshold']);
 			maxEffStrain = 1;

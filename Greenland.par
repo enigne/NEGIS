@@ -1,0 +1,141 @@
+%required Data
+rootFolder = '/Users/chenggong/';
+accpath   = [rootFolder, '/ModelData/Greenland/RACMO2Accumulation/SMBGreenland/smb_1961-1990.mat'];
+
+%WARNING: we do have a levelset here, so we must set it to one even for stressbalances...
+md.transient.ismovingfront=1;
+
+disp('   Interpolating mask');
+mask = int8(interpBedmachineGreenland(md.mesh.x,md.mesh.y,'mask'));
+md.mask.ice_levelset= -1*ones(md.mesh.numberofvertices,1);
+pos = find(mask<1);
+md.mask.ice_levelset(pos)=1;
+	
+%% remove some rocks by putting ice on them
+%pos=find(ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/rocks.exp',2));
+%md.mask.ice_levelset(pos) = -1;
+
+disp('      reading MC bed (assumes no floating ice)');
+md.geometry.bed  = interpBedmachineGreenland(md.mesh.x,md.mesh.y,'bed');
+md.geometry.base = md.geometry.bed;
+
+% define forever ice region 
+%forever_ice_mask = zeros(md.mesh.numberofvertices,1);
+%in=ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/forever_ice.exp',1);
+%forever_ice_mask(find(in)) = 1;
+%md.results.forever_ice_mask = forever_ice_mask;
+%% set ice mask
+%md.mask.ice_levelset(forever_ice_mask>0) = -1;
+
+disp('      reading Howat surface');
+md.geometry.surface=interpBedmachineGreenland(md.mesh.x,md.mesh.y,'surface');
+pos = find(md.mask.ice_levelset>0);
+md.geometry.surface(pos) = md.geometry.base(pos)+10; %Minimum thickness
+
+md.geometry.thickness = md.geometry.surface - md.geometry.bed;
+pos=find(md.geometry.thickness<=10);
+md.geometry.surface(pos) = md.geometry.base(pos)+10; %Minimum thickness
+md.geometry.thickness = md.geometry.surface - md.geometry.bed;
+
+md.masstransport.min_thickness = 10;
+
+disp('   Adjusting ice mask');
+%Tricky part here: we want to offset the mask by one element so that we don't end up with a cliff at the transition
+pos = find(max(md.mask.ice_levelset(md.mesh.elements),[],2)>0);
+md.mask.ice_levelset(md.mesh.elements(pos,:)) = 1;
+% For the region where surface is NaN, set thickness to small value (consistency requires >0)
+pos=find((md.mask.ice_levelset<0).*(md.geometry.surface<0));
+md.mask.ice_levelset(pos)=1;
+pos=find((md.mask.ice_levelset<0).*(isnan(md.geometry.surface)));
+md.mask.ice_levelset(pos)=1;
+
+disp('      -- reconstruct thickness');
+md.geometry.thickness=md.geometry.surface-md.geometry.base;
+
+disp('      reading velocities ');
+[md.inversion.vx_obs md.inversion.vy_obs]=interpJoughinCompositeGreenland(md.mesh.x,md.mesh.y);
+pos=find(isnan(md.inversion.vx_obs) | isnan(md.inversion.vy_obs));
+md.inversion.vx_obs(pos)=0;
+md.inversion.vy_obs(pos)=0;
+md.inversion.vel_obs  = sqrt(md.inversion.vx_obs.^2+md.inversion.vy_obs.^2);
+md.initialization.vx  = md.inversion.vx_obs;
+md.initialization.vy  = md.inversion.vy_obs;
+md.initialization.vz  = zeros(md.mesh.numberofvertices,1);
+md.initialization.vel = md.inversion.vel_obs;
+
+disp('   Initialize basal friction using driving stress');
+disp('   -- Smooth the ice surface with 20 L2 projections and then compute the surface slopes');
+asurf    = averaging(md,md.geometry.surface,20); % maybe executing 20 L2 projection is ok
+[sx,sy,s]= slope(md,asurf); % slope 's' comes on elements
+sslope   = averaging(md,s,1); % average the slope once on the vertices, because 's' comes on elements, we need this data on vertices
+disp('   -- Set the lower bound of velocity, pressure and friction coefficient');
+min_velocity = 0;
+min_pressure = 0;
+min_friction_coef = 0.00;
+disp('   -- Process surface velocity data');
+vel      = md.inversion.vel_obs;
+flags    = (vel==0).*(md.mask.ice_levelset<0); % interpolate on the ice parts
+pos1     = find(flags);
+pos2     = find(~flags);
+vel(pos1)= griddata(md.mesh.x(pos2),md.mesh.y(pos2),vel(pos2),md.mesh.x(pos1),md.mesh.y(pos1)); % interpolating the velocities where vel==0
+vel      = max(vel,min_velocity); % setting minimum velocity value
+disp('   -- Calculate effective pressure and the initial pressure');
+Neff                       = (md.materials.rho_ice*md.geometry.thickness+md.materials.rho_water*md.geometry.base)*md.constants.g;
+Neff(find(Neff<=0))        = min_pressure; % setting minimum positve pressure
+md.initialization.pressure = md.materials.rho_ice*md.geometry.thickness*md.constants.g; % setting the initial pressure
+p = 1; 
+q = 1;
+disp(['   -- Deduce friction coefficient from driving stress, with p=',num2str(p), ', q=', num2str(q)]);
+md.friction.p           = p*ones(md.mesh.numberofelements,1);
+md.friction.q           = q*ones(md.mesh.numberofelements,1);
+driving_stress          = md.materials.rho_ice*md.constants.g*md.geometry.thickness.*(sslope);
+md.friction.coefficient = sqrt(driving_stress./((Neff.^(q/p)).*(vel/md.constants.yts).^(1/p)));
+md.friction.coefficient = min(md.friction.coefficient,300^(1/p));
+md.friction.coupling = 2; % will be a default setting later, coupling=0 will give non-physical water pressure when above sea level.
+disp('   -- Extrapolate on ice free regions (using griddata)');
+flags = (md.mask.ice_levelset>0); % no ice
+pos1  = find(flags);
+pos2  = find(~flags);
+md.friction.coefficient(pos1) = griddata(md.mesh.x(pos2),md.mesh.y(pos2),md.friction.coefficient(pos2),md.mesh.x(pos1),md.mesh.y(pos1));
+pos = find(isnan(md.friction.coefficient) | md.friction.coefficient <=0);
+md.friction.coefficient(pos)  = min_friction_coef;
+% set the no ice area and negative effective pressure area to have minimal friction coef
+md.friction.coefficient(pos1)  = min_friction_coef;
+md.friction.coefficient(pos1)  = min_friction_coef;
+md.friction.coefficient(Neff<=0)  = min_friction_coef;
+%md.friction.coefficient = 50*ones(md.mesh.numberofvertices,1); %q = 1.
+
+%flow law
+disp('   Creating flow law parameters (assume ice is at -5°C for now)');
+md.materials.rheology_n = 3*ones(md.mesh.numberofelements,1);
+md.materials.rheology_B = cuffey(273.15 - 5)*ones(md.mesh.numberofvertices,1);
+
+disp('   Loading accumulation rates from RACMO');
+load(accpath);
+md.smb.mass_balance = InterpFromGridToMesh(x_m,y_m,accumulation,md.mesh.x,md.mesh.y,-99999);
+clear x_m y_m accumulation
+md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
+md.basalforcings.floatingice_melting_rate = zeros(md.mesh.numberofvertices,1);
+
+disp('   Geothermal flux from Shapiro et al.');
+md.basalforcings.geothermalflux=interpSeaRISE(md.mesh.x,md.mesh.y,'bheatflx', 1,'/Users/chenggong/ModelData/SeaRISE/Greenland_5km_dev1.2.nc');
+
+disp('   Setting up thermal model');
+md.initialization.temperature=min(0,interpSeaRISE(md.mesh.x,md.mesh.y,'surftemp', 1,'/Users/chenggong/ModelData/SeaRISE/Greenland_5km_dev1.2.nc'))+273.15;
+md.initialization.waterfraction=zeros(md.mesh.numberofvertices,1);
+md.initialization.watercolumn=zeros(md.mesh.numberofvertices,1);
+md.thermal.spctemperature=md.initialization.temperature;
+md.thermal.isenthalpy=1;
+md.thermal.isdynamicbasalspc=1;
+
+%Deal with boundary conditions:
+disp('   Set Boundary conditions');
+md.stressbalance.spcvx=NaN*ones(md.mesh.numberofvertices,1);
+md.stressbalance.spcvy=NaN*ones(md.mesh.numberofvertices,1);
+md.stressbalance.spcvz=NaN*ones(md.mesh.numberofvertices,1);
+md.stressbalance.referential=NaN*ones(md.mesh.numberofvertices,6);
+md.stressbalance.loadingforce=0*ones(md.mesh.numberofvertices,3);
+pos=find((md.mask.ice_levelset<0).*(md.mesh.vertexonboundary));
+md.stressbalance.spcvx(pos)=md.initialization.vx(pos);
+md.stressbalance.spcvy(pos)=md.initialization.vy(pos);
+md.stressbalance.spcvz(pos)=0;

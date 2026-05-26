@@ -2,11 +2,11 @@ clear
 close all
 
 today = datestr(date(), 'yyyymmdd');
-experiments = [23];
-AXIS = [ -0.2231   -0.0996   -2.3152   -2.2340]*1e6;
+experiments = [1];
+AXIS = [    0.3979    0.5432   -1.2014   -0.9592]*1e6;
 if any(experiments == 1) % exp 1: setup project ISMIP6 temperature to the domain, with shear margin weakening {{{
-	steps = [1, 2];
-	md = runme('steps', steps, 'damageType', 3);
+	steps = [1,2];
+	md = runme('steps', steps, 'damageType', 0);
 end %}}}
 if any(experiments == 2) % exp 2: inversion Budd{{{
 	steps = [3];
