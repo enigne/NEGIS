@@ -5,39 +5,64 @@ accpath   = [rootFolder, '/ModelData/Greenland/RACMO2Accumulation/SMBGreenland/s
 %WARNING: we do have a levelset here, so we must set it to one even for stressbalances...
 md.transient.ismovingfront=1;
 
+%Minimum values used in the parameterzation
+min_thickness                 = 1.; % minimum ice thickness used to setup the initial geometry
+min_surface                   = min_thickness*(1-md.materials.rho_ice/md.materials.rho_water) ;
+md.masstransport.min_thickness= min_thickness;
+
 disp('   Interpolating mask');
 mask = int8(interpBedmachineGreenland(md.mesh.x,md.mesh.y,'mask'));
-md.mask.ice_levelset= -1*ones(md.mesh.numberofvertices,1);
-pos = find(mask<1);
-md.mask.ice_levelset(pos)=1;
-	
-%% remove some rocks by putting ice on them
-%pos=find(ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/rocks.exp',2));
-%md.mask.ice_levelset(pos) = -1;
+md.mask.ice_levelset   = -1*ones(md.mesh.numberofvertices,1);  % set 'presence of ice' everywhere
+md.mask.ocean_levelset = +1*ones(md.mesh.numberofvertices,1);  % set 'grounded ice' everywhere
+pos = find(mask<1); % we also want a bit of ice where there are rocks, so keeping ice where mask==1
+md.mask.ice_levelset(pos) = 1; % set 'no ice' only in the ocean part
+pos = find(mask==0 | mask==3);
+md.mask.ocean_levelset(pos) =-1; % set 'floating ice' on the ocean part and on the ice shelves
+md.mask.ocean_levelset=reinitializelevelset(md, md.mask.ocean_levelset);
+md.mask.ice_levelset=reinitializelevelset(md, md.mask.ice_levelset);
 
-disp('      reading MC bed (assumes no floating ice)');
+
+disp('      Reading geometry');
+md.geometry.surface  = interpBedmachineGreenland(md.mesh.x,md.mesh.y,'surface');
+pos = find(md.geometry.surface<1.e-10); % ocean part or rocks
+md.geometry.surface(pos)   = min_surface; % set minimum ice surface on the ocean part
+
 md.geometry.bed  = interpBedmachineGreenland(md.mesh.x,md.mesh.y,'bed');
-md.geometry.base = md.geometry.bed;
+md.geometry.base                 = zeros(length(md.geometry.bed),1); % initial setup
 
-% define forever ice region 
-%forever_ice_mask = zeros(md.mesh.numberofvertices,1);
-%in=ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/forever_ice.exp',1);
-%forever_ice_mask(find(in)) = 1;
-%md.results.forever_ice_mask = forever_ice_mask;
-%% set ice mask
-%md.mask.ice_levelset(forever_ice_mask>0) = -1;
+% Setting up ice thickness, ice base and grounded ice level set based on the hydrostatic equilibrium
+floatation_base                  = md.geometry.surface*md.materials.rho_ice/(md.materials.rho_ice-md.materials.rho_water); % using the corrected surface
+pos                              = find(floatation_base<md.geometry.bed); % grounded ice
+md.geometry.base(pos)            = md.geometry.bed(pos);
+md.mask.ocean_levelset(pos)      = 1;
+pos                              = find(floatation_base>md.geometry.bed); % floating ice
+md.geometry.base(pos)            = floatation_base(pos);
+md.mask.ocean_levelset(pos)      = -1;
+md.geometry.thickness            = md.geometry.surface-md.geometry.base;
+pos                              = find(md.geometry.thickness<min_thickness); % dealing with rocks or ocean part
+md.geometry.thickness(pos)       = min_thickness;
+md.geometry.surface(pos)         = md.geometry.thickness(pos)+md.geometry.base(pos);
 
-disp('      reading Howat surface');
-md.geometry.surface=interpBedmachineGreenland(md.mesh.x,md.mesh.y,'surface');
-pos = find(md.mask.ice_levelset>0);
-md.geometry.surface(pos) = md.geometry.base(pos)+10; %Minimum thickness
-
-md.geometry.thickness = md.geometry.surface - md.geometry.bed;
-pos=find(md.geometry.thickness<=10);
-md.geometry.surface(pos) = md.geometry.base(pos)+10; %Minimum thickness
-md.geometry.thickness = md.geometry.surface - md.geometry.bed;
-
-md.masstransport.min_thickness = 10;
+% Some checks{{{
+if any(isnan(md.geometry.bed)) | any(isnan(md.geometry.surface))
+   error('NaN was found in the data set!')
+end
+if any(md.geometry.surface<0 & md.mask.ice_levelset<0)
+   error('surface < 0 on ice part!')
+end
+if any(md.geometry.thickness<min_thickness)
+   error('thickness < min_thickness)!')
+end
+if any(md.geometry.base~=md.geometry.bed & md.mask.ocean_levelset>0)
+   error('base is not equal to bed on grounded ice!')
+end
+if any(abs(md.geometry.thickness-(md.geometry.surface-md.geometry.base))>1.e-10)
+   error('thickness is not equal to surface-base!');
+end
+if any(md.geometry.base<md.geometry.bed & md.mask.ocean_levelset<0)
+   error('base < bed on floating ice')
+end
+%}}}
 
 disp('   Adjusting ice mask');
 %Tricky part here: we want to offset the mask by one element so that we don't end up with a cliff at the transition
@@ -48,6 +73,8 @@ pos=find((md.mask.ice_levelset<0).*(md.geometry.surface<0));
 md.mask.ice_levelset(pos)=1;
 pos=find((md.mask.ice_levelset<0).*(isnan(md.geometry.surface)));
 md.mask.ice_levelset(pos)=1;
+md.mask.ocean_levelset = reinitializelevelset(md, md.mask.ocean_levelset);
+md.mask.ice_levelset   = reinitializelevelset(md, md.mask.ice_levelset);
 
 disp('      -- reconstruct thickness');
 md.geometry.thickness=md.geometry.surface-md.geometry.base;

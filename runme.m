@@ -153,7 +153,7 @@ function varargout=runme(varargin)
       cluster.time = jobTime;
       waitonlock = 0;
 	else
-		cluster=generic('name',oshostname(),'np', 64);
+		cluster=generic('name',oshostname(),'np', 14);
 		waitonlock = Inf;
 	end
 	clear clustername
@@ -241,7 +241,7 @@ function varargout=runme(varargin)
 		% set Nan for no ice in ISMIP
 		md_ISMIP.results.temperature(md_ISMIP.mask.ice_levelset>=0) = NaN;
 		% Interpolate 
-		vellimit = 7500;
+		vellimit = 1500;
 		tGlacier = InterpFromMeshToMesh2d(md_ISMIP.mesh.elements, md_ISMIP.mesh.x, md_ISMIP.mesh.y, md_ISMIP.results.temperature, md.mesh.x, md.mesh.y);
 
 		% compute the average temperature ove the fast flowing region of the given glacier
@@ -251,6 +251,8 @@ function varargout=runme(varargin)
 		% set no ice region in ISMIP to be the average temperature
 		md_ISMIP.results.temperature(md_ISMIP.mask.ice_levelset>=0) = avgTGlacier;
 		tGlacier = InterpFromMeshToMesh2d(md_ISMIP.mesh.elements, md_ISMIP.mesh.x, md_ISMIP.mesh.y, md_ISMIP.results.temperature, md.mesh.x, md.mesh.y);
+		tnan = isnan(tGlacier);
+		tGlacier(tnan) = avgTGlacier;
 
 		disp([' Reassigning flow law parameters according to ISMIP6 results']);
 		md.materials.rheology_B = cuffey(tGlacier); % tGlacier is already in K
@@ -310,15 +312,93 @@ function varargout=runme(varargin)
 
 		savemodel(org,md);
 	end%}}}
+	if perform(org, ['InversionB',damage_suffix]),% {{{
+
+		md=loadmodel(org, ['Param_ISMIP', damage_suffix]);
+
+		% set M1QN3 package
+		md.inversion=m1qn3inversion(md.inversion);
+
+		% Set inversion data
+		md.inversion.vx_obs=md.initialization.vx; % initialization was defined in last step (raw data, with NaN)
+		md.inversion.vy_obs=md.initialization.vy; % initialization was defined in last step (raw data, with NaN)
+
+		pos=find(isnan(md.inversion.vx_obs) | isnan(md.inversion.vy_obs));
+		md.inversion.vx_obs(pos)=0;
+		md.inversion.vy_obs(pos)=0;
+		md.inversion.vel_obs=sqrt(md.inversion.vx_obs.^2+md.inversion.vy_obs.^2);
+		md.initialization.vx(pos)=0;
+		md.initialization.vy(pos)=0;
+		md.initialization.vel(pos)=0;
+
+		% Control general
+		md.inversion.iscontrol=1;
+		md.inversion.maxsteps=40;
+		md.inversion.maxiter=40;
+		md.inversion.dxmin=0.1;
+		md.inversion.gttol=1.0e-6;
+		md.inversion.incomplete_adjoint=0; % 0: non linear viscosity, 1: linear viscosity 04/29/2019 changed to non linear
+
+		% Cost functions
+		md.inversion.cost_functions=[101 103 502];
+		md.inversion.cost_functions_coefficients=ones(md.mesh.numberofvertices,length(md.inversion.cost_functions));
+      md.inversion.cost_functions_coefficients(:,1)=costcoeffs(1);
+      md.inversion.cost_functions_coefficients(:,2)=costcoeffs(2);
+		md.inversion.cost_functions_coefficients(:,end)=costcoeffs(3);
+		md.inversion.cost_functions_coefficients(pos,:)=0; % positions with NaN in the velocity data set
+
+		% Controls
+		% setting initial guess for rheology B
+		md.inversion.control_parameters={'MaterialsRheologyBbar'};
+		md.inversion.min_parameters=cuffey(273.15)*ones(size(md.materials.rheology_B)); % from Seroussi et al, 2014
+		md.inversion.max_parameters=cuffey(273.15-30)*ones(size(md.materials.rheology_B)); % from Seroussi et al, 2014
+
+		% Additional parameters
+		md.stressbalance.restol=0.0001; % 04/29/2019
+		md.stressbalance.reltol=0.01; % 04/29/2019
+		md.stressbalance.abstol=10; % 04/29/2019
+		md.stressbalance.maxiter=40; % 08/21/2019
+
+		% Prepare to solve
+		md.cluster=cluster;
+		md.verbose=verbose('solution',false,'control',true);
+		md.miscellaneous.name='inversion_B';
+		mds=extract(md,md.mask.ocean_levelset<0);
+		mds.friction.coefficient(:)=0; % make sure there is no basal friction
+		% Solve
+		mds.toolkits.DefaultAnalysis=bcgslbjacobioptions();% biconjugate gradient with block Jacobi preconditioner
+		mds.settings.solver_residue_threshold=NaN; % 11/05/2019
+		mds.stressbalance.maxiter=50; % 10/24/2019
+		mds.stressbalance.reltol=NaN; % 11/05/2019
+		mds.stressbalance.abstol=NaN; % 11/05/2019
+
+		mds=solve(mds,'Stressbalance'); % only extracted model
+
+		% Update model rheology_B accordingly
+		md.materials.rheology_B(mds.mesh.extractedvertices)=mds.results.StressbalanceSolution.MaterialsRheologyBbar;
+
+		savemodel(org,md);
+	end
+	%}}}
 	if perform(org, ['Inversion_drag_ISMIP', damage_suffix, '_Budd'])% {{{
 		if (rerun_inversion)
 			disp(['  Rerun inversion using previous results as initial guess'])
 			md=loadmodel(org, ['Inversion_drag_ISMIP', damage_suffix, '_Budd']);
 		else
-			md=loadmodel(org, ['Param_ISMIP', damage_suffix]);
+			md=loadmodel(org, ['InversionB', damage_suffix]);
 		end
 		% fixed after add this option to effective pressure coupling
 		md.friction.coupling = 2;
+
+      %No friction on PURELY ocean element
+      pos_e = find(min(md.mask.ice_levelset(md.mesh.elements),[],2)<0);
+      flags=ones(md.mesh.numberofvertices,1);
+      flags(md.mesh.elements(pos_e,:))=0;
+      md.friction.coefficient(find(flags))=0.0;
+
+      % also set floating ice friction to 0.0
+      pos=find(md.mask.ocean_levelset<0);
+      md.friction.coefficient(pos) = 0.0;
 
 		%Control general
 		md.inversion=m1qn3inversion(md.inversion);
@@ -334,20 +414,23 @@ function varargout=runme(varargin)
 		md.inversion.cost_functions_coefficients(:,3)=costcoeffs(3);
 		pos=find(md.mask.ice_levelset>0);
 		md.inversion.cost_functions_coefficients(pos,1:2)=0;
-		pos=find(md.mask.ice_levelset<=0 & md.geometry.thickness<=10);
+		% skip inversion for H=minimal thickness nodes
+		pos=find(md.mask.ice_levelset<=0 & md.geometry.thickness<=1);
 		md.inversion.cost_functions_coefficients(pos,1:2)=0;
+      %pos=find(md.mask.ocean_levelset<0);
+		%md.inversion.cost_functions_coefficients(pos,:)=0;
 
 		%Controls
 		md.inversion.control_parameters={'FrictionCoefficient'};
 		md.inversion.maxsteps=400;
 		md.inversion.maxiter =400;
-		md.inversion.min_parameters=1e-5*ones(md.mesh.numberofvertices,1);
-		md.inversion.max_parameters=1e4*ones(md.mesh.numberofvertices,1);
+		md.inversion.min_parameters=1e-2*ones(md.mesh.numberofvertices,1);
+		md.inversion.max_parameters=1e3*ones(md.mesh.numberofvertices,1);
 		md.inversion.control_scaling_factors=1;
 		md.inversion.dxmin = 1e-6;
 
 		%Additional parameters
-		md.stressbalance.restol=1e-5;
+		md.stressbalance.restol=1e-4;
 		md.stressbalance.reltol=1e-3;
 		md.stressbalance.abstol=NaN;
 
