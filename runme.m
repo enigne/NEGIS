@@ -319,6 +319,16 @@ function varargout=runme(varargin)
 		% set M1QN3 package
 		md.inversion=m1qn3inversion(md.inversion);
 
+		%No friction on PURELY ocean element
+      pos_e = find(min(md.mask.ice_levelset(md.mesh.elements),[],2)<0);
+      flags=ones(md.mesh.numberofvertices,1);
+      flags(md.mesh.elements(pos_e,:))=0;
+      md.friction.coefficient(find(flags))=0.0;
+
+      % also set floating ice friction to 0.0
+      pos=find(md.mask.ocean_levelset<0);
+      md.friction.coefficient(pos) = 0.0;
+
 		% Set inversion data
 		md.inversion.vx_obs=md.initialization.vx; % initialization was defined in last step (raw data, with NaN)
 		md.inversion.vy_obs=md.initialization.vy; % initialization was defined in last step (raw data, with NaN)
@@ -354,10 +364,10 @@ function varargout=runme(varargin)
 		md.inversion.max_parameters=cuffey(273.15-30)*ones(size(md.materials.rheology_B)); % from Seroussi et al, 2014
 
 		% Additional parameters
-		md.stressbalance.restol=0.0001; % 04/29/2019
-		md.stressbalance.reltol=0.01; % 04/29/2019
-		md.stressbalance.abstol=10; % 04/29/2019
-		md.stressbalance.maxiter=40; % 08/21/2019
+		mds.stressbalance.maxiter=50; % 10/24/2019
+		mds.stressbalance.restol=0.0001; % 04/29/2019
+		mds.stressbalance.reltol=0.01; % 11/05/2019
+		mds.stressbalance.abstol=NaN; % 11/05/2019
 
 		% Prepare to solve
 		md.cluster=cluster;
@@ -375,6 +385,7 @@ function varargout=runme(varargin)
 		mds=solve(mds,'Stressbalance'); % only extracted model
 
 		% Update model rheology_B accordingly
+		md.results.rheology_B = md.materials.rheology_B;
 		md.materials.rheology_B(mds.mesh.extractedvertices)=mds.results.StressbalanceSolution.MaterialsRheologyBbar;
 
 		savemodel(org,md);
@@ -431,7 +442,7 @@ function varargout=runme(varargin)
 
 		%Additional parameters
 		md.stressbalance.restol=1e-4;
-		md.stressbalance.reltol=1e-3;
+		md.stressbalance.reltol=1e-2;
 		md.stressbalance.abstol=NaN;
 
 		md.toolkits.DefaultAnalysis=bcgslbjacobioptions();
@@ -443,11 +454,80 @@ function varargout=runme(varargin)
 
 		%Put results back into the model
 		md.friction.coefficient=md.results.StressbalanceSolution.FrictionCoefficient;
-		md.initialization.vx=md.results.StressbalanceSolution.Vx;
-		md.initialization.vy=md.results.StressbalanceSolution.Vy;
 
 		savemodel(org,md);
 	end%}}}
+	if perform(org, ['InversionB2',damage_suffix]),% {{{
+
+		md=loadmodel(org, ['Inversion_drag_ISMIP', damage_suffix, '_Budd']);
+
+		% set M1QN3 package
+		md.inversion=m1qn3inversion(md.inversion);
+
+		% Set inversion data
+		md.inversion.vx_obs=md.initialization.vx; % initialization was defined in last step (raw data, with NaN)
+		md.inversion.vy_obs=md.initialization.vy; % initialization was defined in last step (raw data, with NaN)
+
+		pos=find(isnan(md.inversion.vx_obs) | isnan(md.inversion.vy_obs));
+		md.inversion.vx_obs(pos)=0;
+		md.inversion.vy_obs(pos)=0;
+		md.inversion.vel_obs=sqrt(md.inversion.vx_obs.^2+md.inversion.vy_obs.^2);
+		md.initialization.vx(pos)=0;
+		md.initialization.vy(pos)=0;
+		md.initialization.vel(pos)=0;
+
+		% Control general
+		md.inversion.iscontrol=1;
+		md.inversion.maxsteps=40;
+		md.inversion.maxiter=40;
+		md.inversion.dxmin=0.1;
+		md.inversion.gttol=1.0e-6;
+		md.inversion.incomplete_adjoint=0; % 0: non linear viscosity, 1: linear viscosity 04/29/2019 changed to non linear
+
+		% Cost functions
+		md.inversion.cost_functions=[101 103 502];
+		md.inversion.cost_functions_coefficients=ones(md.mesh.numberofvertices,length(md.inversion.cost_functions));
+		md.inversion.cost_functions_coefficients(:,1)=costcoeffs(1);
+		md.inversion.cost_functions_coefficients(:,2)=costcoeffs(2);
+		md.inversion.cost_functions_coefficients(:,end)=costcoeffs(3);
+		md.inversion.cost_functions_coefficients(pos,:)=0; % positions with NaN in the velocity data set
+
+		% Controls
+		% setting initial guess for rheology B
+		md.inversion.control_parameters={'MaterialsRheologyBbar'};
+		md.inversion.min_parameters=cuffey(273.15)*ones(size(md.materials.rheology_B)); % from Seroussi et al, 2014
+		md.inversion.max_parameters=cuffey(273.15-30)*ones(size(md.materials.rheology_B)); % from Seroussi et al, 2014
+
+		% Additional parameters
+		md.stressbalance.restol=0.0001; % 04/29/2019
+		md.stressbalance.reltol=0.01; % 04/29/2019
+		md.stressbalance.abstol=NaN; % 04/29/2019
+		md.stressbalance.maxiter=40; % 08/21/2019
+
+		% Prepare to solve
+		md.cluster=cluster;
+		md.verbose=verbose('solution',false,'control',true);
+		md.miscellaneous.name='inversion_B';
+		mds=extract(md,md.mask.ocean_levelset<0);
+		mds.friction.coefficient(:)=0; % make sure there is no basal friction
+		% Solve
+		mds.toolkits.DefaultAnalysis=bcgslbjacobioptions();% biconjugate gradient with block Jacobi preconditioner
+		mds.settings.solver_residue_threshold=NaN; % 11/05/2019
+		mds.stressbalance.maxiter=50; % 10/24/2019
+		mds.stressbalance.restol=0.0001; % 04/29/2019
+		mds.stressbalance.reltol=0.01; % 11/05/2019
+		mds.stressbalance.abstol=NaN; % 11/05/2019
+
+		mds=solve(mds,'Stressbalance'); % only extracted model
+
+		% Update model rheology_B accordingly
+		md.results.rheology_B = md.materials.rheology_B;
+		md.materials.rheology_B(mds.mesh.extractedvertices)=mds.results.StressbalanceSolution.MaterialsRheologyBbar;
+
+		savemodel(org,md);
+	end
+	%}}}
+
 	if perform(org, ['Inversion_drag_ISMIP', damage_suffix, '_Weertman'])% {{{
 
 		if (rerun_inversion)

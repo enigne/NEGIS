@@ -2,7 +2,7 @@ clear
 close all
 
 today = datestr(date(), 'yyyymmdd');
-experiments = [3];
+experiments = [2];
 AXIS = [    0.3979    0.5432   -1.2014   -0.9592]*1e6;
 if any(experiments == 1) % exp 1: setup project ISMIP6 temperature to the domain, with shear margin weakening {{{
 	steps = [1,2];
@@ -18,7 +18,7 @@ if any(experiments == 2) % exp 2: inversion B{{{
 end %}}}
 if any(experiments == 3) % exp 3: inversion Budd{{{
 	steps = [4];
-	costcoeffs = [100, 0.1, 5e-9];
+	costcoeffs = [100, 0.03, 5e-9];
 	AXIS = [    0.4190    0.5400   -1.1756   -0.9673]*1e6;
 	md = runme('steps', steps, ...
 		'damageType', 0,...
@@ -27,10 +27,19 @@ if any(experiments == 3) % exp 3: inversion Budd{{{
 		'friction', 'Budd', ...
 		'cost coefficients', costcoeffs);
 	plotmodel(md, 'data', md.results.StressbalanceSolution.Vel-md.inversion.vel_obs, 'caxis', [-300,300], 'title', 'Vel-Velobs', ...
-		'mask#all', md.mask.ice_levelset<0, 'axis#all',AXIS,...
+		'axis#all',AXIS,...
+		'mask#all',md.mask.ice_levelset<0,...
 		'data', log(md.friction.coefficient)./log(10), 'title', 'log_{10}(coefficient)',...
 		'data', md.results.StressbalanceSolution.Vel, 'caxis#3,4', [0,2e3], 'title', 'Vel', ...
 		'data', md.inversion.vel_obs, 'title', 'Obs')
+end %}}}
+if any(experiments == 4) % exp 4: inversion B again{{{
+	steps = [5];
+	costcoeffs = [700, 15, 2e-16];
+	AXIS = [    0.4190    0.5400   -1.1756   -0.9673]*1e6;
+	md = runme('steps', steps, ...
+		'damageType', 0,...
+		'cost coefficients', costcoeffs);
 end %}}}
 
 
