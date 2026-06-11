@@ -426,8 +426,8 @@ function varargout=runme(varargin)
 		pos=find(md.mask.ice_levelset>0);
 		md.inversion.cost_functions_coefficients(pos,1:2)=0;
 		% skip inversion for H=minimal thickness nodes
-		pos=find(md.mask.ice_levelset<=0 & md.geometry.thickness<=1);
-		md.inversion.cost_functions_coefficients(pos,1:2)=0;
+%		pos=find(md.mask.ice_levelset<=0 & md.geometry.thickness<=1);
+%		md.inversion.cost_functions_coefficients(pos,1:2)=0;
       %pos=find(md.mask.ocean_levelset<0);
 		%md.inversion.cost_functions_coefficients(pos,:)=0;
 

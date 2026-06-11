@@ -2,7 +2,7 @@ clear
 close all
 
 today = datestr(date(), 'yyyymmdd');
-experiments = [2];
+experiments = [3];
 AXIS = [    0.3979    0.5432   -1.2014   -0.9592]*1e6;
 if any(experiments == 1) % exp 1: setup project ISMIP6 temperature to the domain, with shear margin weakening {{{
 	steps = [1,2];
