@@ -539,10 +539,10 @@ function varargout=runme(varargin)
          flags=ones(md.mesh.numberofvertices,1);
          flags(md.mesh.elements(pos_e,:))=0;
 
-         md.friction.C(find(flags))=0.01;
-         md.friction.C(md.friction.C==0)=0.01;
+         md.friction.C(find(flags))=0.0;
+         %md.friction.C(md.friction.C==0)=0.01;
 		else
-			md=loadmodel(org, ['Param_ISMIP', damage_suffix]);
+			md=loadmodel(org, ['InversionB', damage_suffix]);
 
 			% Set the friction law to schoof's
 			md.friction=frictionschoof();
@@ -551,14 +551,15 @@ function varargout=runme(varargin)
 			md.friction.C = 1000*ones(md.mesh.numberofvertices,1);
 			md.friction.coupling = 2;
 
-			in=ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/remove_high_schoof_C.exp',1);
-			md.friction.C(find(in)) = 0.01;
 			%No friction on PURELY ocean element
 			pos_e = find(min(md.mask.ice_levelset(md.mesh.elements),[],2)<0);
 			flags=ones(md.mesh.numberofvertices,1);
 			flags(md.mesh.elements(pos_e,:))=0;
 			md.friction.C(find(flags))=0.01;
 		end
+
+		pos=find(md.mask.ocean_levelset<0);
+		md.friction.C(pos) = 0;
 
 		%Control general
 		md.inversion=m1qn3inversion(md.inversion);
@@ -577,15 +578,15 @@ function varargout=runme(varargin)
 
 		%Controls
 		md.inversion.control_parameters={'FrictionC'};
-		md.inversion.maxsteps=500;
-		md.inversion.maxiter =500;
+		md.inversion.maxsteps=400;
+		md.inversion.maxiter =400;
 		md.inversion.min_parameters=1e-4*ones(md.mesh.numberofvertices,1);
 		md.inversion.max_parameters=1e5*ones(md.mesh.numberofvertices,1);
 		md.inversion.control_scaling_factors=1;
 		md.inversion.dxmin = 1e-6;
 		%Additional parameters
-		md.stressbalance.restol=1e-5;
-		md.stressbalance.reltol=1e-4;
+		md.stressbalance.restol=1e-4;
+		md.stressbalance.reltol=1e-2;
 		md.stressbalance.abstol=NaN;
 		md.stressbalance.maxiter = 100;
 
@@ -597,8 +598,6 @@ function varargout=runme(varargin)
 
 		%Put results back into the model
 		md.friction.C=md.results.StressbalanceSolution.FrictionC;
-		md.initialization.vx=md.results.StressbalanceSolution.Vx;
-		md.initialization.vy=md.results.StressbalanceSolution.Vy;
 
 		savemodel(org,md);
 	end%}}}
