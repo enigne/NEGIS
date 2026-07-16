@@ -645,6 +645,154 @@ function varargout=runme(varargin)
 		%Clean up
 		savemodel(org,md);
 	end%}}}
+	if perform(org, ['Set_SMB_', smb_model, suffix])% {{{
+		md=loadmodel(org,['Set_GreenFronts', suffix]);
+
+		% Step 1: RACMO also goes to 2022, but not MAR(only to 2020), for MAR we will repeat the average of the last three years
+		md.smb.mass_balance = [];
+
+		if strcmp(smb_model, 'RACMO')
+			% load RACMO
+			for i= md.timestepping.start_time: md.timestepping.final_time
+				if (i>=1990) & (i<=2021)
+					filename = ['/Users/chenggong/ModelData/Greenland/RACMO23p2_2022_Greenland/smb/smb_rec.', num2str(i), '.BN_RACMO2.3p2_ERA5_3h_FGRN055.1km.MM.nc'];
+
+					%Get time
+					T  = double(ncread(filename,'time')); % in days
+					if leapyear(i)
+						time = i + (T)/366;
+					else
+						time = i + (T)/365;
+					end
+
+					%Coordinates
+					x=double(ncread(filename,'x'));
+					y=double(ncread(filename,'y'));
+
+					%Load SMB for this year
+					disp(['Loading ' filename]);
+					SMB=double(ncread(filename,'smb_rec'))/1000.0*12.0*md.materials.rho_freshwater/md.materials.rho_ice; %from mmWE/month to mIE/yr
+				elseif (i>= 1958) & (i<=1989)
+					filename = ['/Users/chenggong/ModelData/Greenland/RACMO23p2_2022_Greenland/smb/smb_rec.', num2str(i), '.BN_RACMO2.3p2_ERA40_ERAIn_FGRN055.1km.MM.nc'];
+					%Get time
+					T  = double(ncread(filename,'time')); % in month
+					time = i + (T+0.5)/12;
+
+					%Coordinates
+					x=double(ncread(filename,'lon'));
+					y=double(ncread(filename,'lat'));
+
+					%Load SMB for this year
+					disp(['Loading ' filename]);
+					SMB=double(ncread(filename,'SMB_rec'))/1000.0*12.0*md.materials.rho_freshwater/md.materials.rho_ice; %from mmWE/month to mIE/yr
+				else
+					disp(['Year ', num2str(i), ' is not coverd in RACMO data, skip for now!'])
+					continue;
+				end
+
+				%Interpolate
+				for m=1:numel(time)
+					smb_mesh=InterpFromGridToMesh(x, y, SMB(:,:,m)', md.mesh.x, md.mesh.y, 0);
+					md.smb.mass_balance = [md.smb.mass_balance, [smb_mesh;time(m)]];
+				end
+			end
+		elseif strcmp(smb_model, 'MAR_6k')
+			md.smb.mass_balance = [];
+			for i= md.timestepping.start_time: md.timestepping.final_time
+				if (i>=1950) & (i<=2021)
+					filename = ['/totten_1/ModelData/Greenland/MAR_6km/MARv3.11.5-Greenland-6km-daily-ERA-', num2str(i), '.nc'];
+					disp(['Loading ' filename]);
+				else
+					disp(['Year ', num2str(i), ' is not coverd in the MAR data, skip for now!'])
+					continue;
+				end
+
+				%Get time
+				T0 = ncreadatt(filename, 'TIME', 'time_origin');
+				T  = ncread(filename,'TIME');
+				time = date2decyear(double(datenum(T0)+T));
+				if ( (min(time) <i ) || (max(time)>i+1) )
+					error(['TIME in ', filename, 'exceeds the year ', num2str(i)])
+				end
+
+				%Coordinates
+				LAT=ncread(filename,'LAT');
+				LON=ncread(filename,'LON');
+
+				%Load SMB for this year
+				SMB=double(ncread(filename,'SMB'))/1000*365.25*md.materials.rho_freshwater/md.materials.rho_ice; %from mmWE/day to mIE/yr
+
+				%Interpolate
+				INDEX=BamgTriangulate(LON(:),LAT(:));
+				SMB_reshaped = reshape(squeeze(SMB(:,:,1,:)),[numel(LAT) numel(time)]);
+				smb_mar=InterpFromMeshToMesh2d(INDEX,LON(:),LAT(:),SMB_reshaped,md.mesh.long,md.mesh.lat);
+
+				%Now use a monthly average
+				smb_monthly = zeros(md.mesh.numberofvertices+1,1);
+				for month=1:12
+					pos = find(time>=time(1)+(month-1)/12  & time<time(1)+month/12);
+					if ~isnan(mean(time(pos)))
+						smb_monthly(1:end-1,month) = mean(smb_mar(:,pos),2);
+						smb_monthly(end    ,month) = mean(time(pos));
+					else
+						disp(['Skipping year ' num2str(time(1)+month/12)]);
+					end
+				end
+
+				md.smb.mass_balance = [md.smb.mass_balance smb_monthly];
+			end
+		elseif strcmp(smb_model, 'MAR')
+			for i= md.timestepping.start_time: md.timestepping.final_time
+				if (i>=1950) & (i<=2019)
+					filename = ['/totten_1/ModelData/Greenland/MARv3.11-ERA5/MARv3.11-monthly-ERA5-', num2str(i), '.nc'];
+					disp(['Loading ' filename]);
+				else
+					disp(['Year ', num2str(i), ' is not coverd in the MAR data, skip for now!'])
+					continue;
+				end
+
+				%Get time
+				T  = double(ncread(filename,'time'));
+				time = i + (T+0.5)/12;
+
+				%Coordinates
+				x=double(ncread(filename,'x'));
+				y=double(ncread(filename,'y'));
+
+				%Load SMB for this year
+				SMB=double(ncread(filename,'SMB'))/1000.0*12.0*md.materials.rho_freshwater/md.materials.rho_ice; %from mmWE/month to mIE/yr
+
+				%Interpolate
+				for m=1:numel(time)
+					smb_mesh=InterpFromGridToMesh(x, y, SMB(:,:,m)', md.mesh.x, md.mesh.y, 0);
+					md.smb.mass_balance = [md.smb.mass_balance, [smb_mesh;time(m)]];
+				end
+			end
+
+			if (md.timestepping.final_time>2020)
+				% Take average of the last three years from the MAR, repeat to the finalTime
+				last3pos = find((md.smb.mass_balance(end,:)>=2017) & (md.smb.mass_balance(end,:)<2020));
+				monthlypos = reshape(last3pos, 3, 12);
+
+				averageSMB = zeros(md.mesh.numberofvertices, 12);
+				for i = 1:12
+					averageSMB(:,i) = mean(md.smb.mass_balance(1:end-1, monthlypos(:,i)),2);
+				end
+				Next = ceil(md.timestepping.final_time - 2020);
+				repeatAverageSMB = repmat(averageSMB,1,Next);
+				repeatTime = 2020+linspace(0.5, Next*12-0.5,Next*12)/12;
+
+				% put this to md.smb.mass_balance for 2020-2022
+				md.smb.mass_balance = [md.smb.mass_balance, [repeatAverageSMB;repeatTime]];
+			end
+		else
+			error(['Unknown SMB model: ', smb_model])
+		end
+
+		savemodel(org,md);
+	end%}}}
+
+
 
 	if perform(org, ['Set_icemask_before1972', suffix])% {{{
 		md=loadmodel(org,['Inversion_drag_ISMIP', suffix]);
@@ -800,156 +948,6 @@ function varargout=runme(varargin)
 		md.stressbalance.spcvz(pos)=0;
 
 		%Clean up
-		savemodel(org,md);
-	end%}}}
-	if perform(org, ['Set_SMB_', smb_model, suffix])% {{{
-		if startTime<1972
-			md=loadmodel(org,['Set_icemask_before1972', suffix]);
-		else
-			md=loadmodel(org,['Set_GreenFronts', suffix]);
-		end
-
-		% Step 1: RACMO also goes to 2022, but not MAR(only to 2020), for MAR we will repeat the average of the last three years
-		md.smb.mass_balance = [];
-
-		if strcmp(smb_model, 'RACMO')
-			% load RACMO
-			for i= md.timestepping.start_time: md.timestepping.final_time
-				if (i>=1990) & (i<=2021)
-					filename = ['/totten_1/ModelData/Greenland/RACMO23p2_2022_Greenland/smb/smb_rec.', num2str(i), '.BN_RACMO2.3p2_ERA5_3h_FGRN055.1km.MM.nc'];
-
-					%Get time
-					T  = double(ncread(filename,'time')); % in days
-					if leapyear(i)
-						time = i + (T)/366;
-					else
-						time = i + (T)/365;
-					end
-
-					%Coordinates
-					x=double(ncread(filename,'x'));
-					y=double(ncread(filename,'y'));
-
-					%Load SMB for this year
-					disp(['Loading ' filename]);
-					SMB=double(ncread(filename,'smb_rec'))/1000.0*12.0*md.materials.rho_freshwater/md.materials.rho_ice; %from mmWE/month to mIE/yr
-				elseif (i>= 1958) & (i<=1989)
-					filename = ['/totten_1/ModelData/Greenland/RACMO23p2_2022_Greenland/smb/smb_rec.', num2str(i), '.BN_RACMO2.3p2_ERA40_ERAIn_FGRN055.1km.MM.nc'];
-					%Get time
-					T  = double(ncread(filename,'time')); % in month
-					time = i + (T+0.5)/12;
-
-					%Coordinates
-					x=double(ncread(filename,'lon'));
-					y=double(ncread(filename,'lat'));
-
-					%Load SMB for this year
-					disp(['Loading ' filename]);
-					SMB=double(ncread(filename,'SMB_rec'))/1000.0*12.0*md.materials.rho_freshwater/md.materials.rho_ice; %from mmWE/month to mIE/yr
-				else
-					disp(['Year ', num2str(i), ' is not coverd in RACMO data, skip for now!'])
-					continue;
-				end
-
-				%Interpolate
-				for m=1:numel(time)
-					smb_mesh=InterpFromGridToMesh(x, y, SMB(:,:,m)', md.mesh.x, md.mesh.y, 0);
-					md.smb.mass_balance = [md.smb.mass_balance, [smb_mesh;time(m)]];
-				end
-			end
-		elseif strcmp(smb_model, 'MAR_6k')
-			md.smb.mass_balance = [];
-			for i= md.timestepping.start_time: md.timestepping.final_time
-				if (i>=1950) & (i<=2021)
-					filename = ['/totten_1/ModelData/Greenland/MAR_6km/MARv3.11.5-Greenland-6km-daily-ERA-', num2str(i), '.nc'];
-					disp(['Loading ' filename]);
-				else
-					disp(['Year ', num2str(i), ' is not coverd in the MAR data, skip for now!'])
-					continue;
-				end
-
-				%Get time
-				T0 = ncreadatt(filename, 'TIME', 'time_origin');
-				T  = ncread(filename,'TIME');
-				time = date2decyear(double(datenum(T0)+T));
-				if ( (min(time) <i ) || (max(time)>i+1) )
-					error(['TIME in ', filename, 'exceeds the year ', num2str(i)])
-				end
-
-				%Coordinates
-				LAT=ncread(filename,'LAT');
-				LON=ncread(filename,'LON');
-
-				%Load SMB for this year
-				SMB=double(ncread(filename,'SMB'))/1000*365.25*md.materials.rho_freshwater/md.materials.rho_ice; %from mmWE/day to mIE/yr
-
-				%Interpolate
-				INDEX=BamgTriangulate(LON(:),LAT(:));
-				SMB_reshaped = reshape(squeeze(SMB(:,:,1,:)),[numel(LAT) numel(time)]);
-				smb_mar=InterpFromMeshToMesh2d(INDEX,LON(:),LAT(:),SMB_reshaped,md.mesh.long,md.mesh.lat);
-
-				%Now use a monthly average
-				smb_monthly = zeros(md.mesh.numberofvertices+1,1);
-				for month=1:12
-					pos = find(time>=time(1)+(month-1)/12  & time<time(1)+month/12);
-					if ~isnan(mean(time(pos)))
-						smb_monthly(1:end-1,month) = mean(smb_mar(:,pos),2);
-						smb_monthly(end    ,month) = mean(time(pos));
-					else
-						disp(['Skipping year ' num2str(time(1)+month/12)]);
-					end
-				end
-
-				md.smb.mass_balance = [md.smb.mass_balance smb_monthly];
-			end
-		elseif strcmp(smb_model, 'MAR')
-			for i= md.timestepping.start_time: md.timestepping.final_time
-				if (i>=1950) & (i<=2019)
-					filename = ['/totten_1/ModelData/Greenland/MARv3.11-ERA5/MARv3.11-monthly-ERA5-', num2str(i), '.nc'];
-					disp(['Loading ' filename]);
-				else
-					disp(['Year ', num2str(i), ' is not coverd in the MAR data, skip for now!'])
-					continue;
-				end
-
-				%Get time
-				T  = double(ncread(filename,'time'));
-				time = i + (T+0.5)/12;
-
-				%Coordinates
-				x=double(ncread(filename,'x'));
-				y=double(ncread(filename,'y'));
-
-				%Load SMB for this year
-				SMB=double(ncread(filename,'SMB'))/1000.0*12.0*md.materials.rho_freshwater/md.materials.rho_ice; %from mmWE/month to mIE/yr
-
-				%Interpolate
-				for m=1:numel(time)
-					smb_mesh=InterpFromGridToMesh(x, y, SMB(:,:,m)', md.mesh.x, md.mesh.y, 0);
-					md.smb.mass_balance = [md.smb.mass_balance, [smb_mesh;time(m)]];
-				end
-			end
-
-			if (md.timestepping.final_time>2020)
-				% Take average of the last three years from the MAR, repeat to the finalTime
-				last3pos = find((md.smb.mass_balance(end,:)>=2017) & (md.smb.mass_balance(end,:)<2020));
-				monthlypos = reshape(last3pos, 3, 12);
-
-				averageSMB = zeros(md.mesh.numberofvertices, 12);
-				for i = 1:12
-					averageSMB(:,i) = mean(md.smb.mass_balance(1:end-1, monthlypos(:,i)),2);
-				end
-				Next = ceil(md.timestepping.final_time - 2020);
-				repeatAverageSMB = repmat(averageSMB,1,Next);
-				repeatTime = 2020+linspace(0.5, Next*12-0.5,Next*12)/12;
-
-				% put this to md.smb.mass_balance for 2020-2022
-				md.smb.mass_balance = [md.smb.mass_balance, [repeatAverageSMB;repeatTime]];
-			end
-		else
-			error(['Unknown SMB model: ', smb_model])
-		end
-
 		savemodel(org,md);
 	end%}}}
 	if perform(org, ['Transient_', smb_model, suffix]),% {{{
