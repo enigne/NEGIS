@@ -2,7 +2,7 @@ clear
 close all
 
 today = datestr(date(), 'yyyymmdd');
-experiments = [6];
+experiments = [7];
 AXIS = [    0.3979    0.5432   -1.2014   -0.9592]*1e6;
 if any(experiments == 1) % exp 1: setup project ISMIP6 temperature to the domain, with shear margin weakening {{{
 	steps = [1,2];
@@ -80,7 +80,16 @@ if any(experiments == 6) % exp 6: inversion Schoof{{{
 		'data', md.results.StressbalanceSolution.Gradient1, 'title', 'Gradient', ...
 		'data', log(md.friction.C)./log(10), 'title', 'log_{10}(coefficient)');
 end %}}}
-
+if any(experiments == 7) % exp 7: set ice masks{{{
+	steps = [7];
+	frictions = {'Budd', 'Schoof', 'Weertman'};
+	for i = 1:length(frictions)
+		md = runme('steps', steps, ...
+			'startTime',2007,...
+			'damageType', 0,...
+			'friction', frictions{i});
+	end
+end %}}}
 
 return
 if any(experiments == 3) % exp 3: rerun inversion Budd{{{

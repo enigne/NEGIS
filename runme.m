@@ -520,6 +520,7 @@ function varargout=runme(varargin)
 		savemodel(org,md);
 	end%}}}
 
+	% step 6--10
 	if perform(org, ['Inversion_drag_ISMIP', damage_suffix, '_Schoof'])% {{{
 
 		if (rerun_inversion)
@@ -601,8 +602,50 @@ function varargout=runme(varargin)
 
 		savemodel(org,md);
 	end%}}}
+	if perform(org, ['Set_GreenFronts', suffix])% {{{
+		md=loadmodel(org,['Inversion_drag_ISMIP', suffix]);
 
-	% step 6--10
+		% Step 1: set start_time to 2007 and final_time to 2022
+		md.timestepping.final_time = finalTime;
+		md.timestepping.start_time = startTime;
+
+		% Step 2: get observed calving front from Greene's dataset, furthest possible, back to 1972
+		mask = interpMonthlyIceMaskGreene(md.mesh.x, md.mesh.y, [md.timestepping.start_time, md.timestepping.final_time], 1, '/Users/chenggong/ModelData/Greenland/IceFrontsGreene/NSIDC-0793_19720915-20220215_V01.0.nc');
+
+		% step 3: mask out 'forever ice' region
+		% define forever ice region
+	%	forever_ice_mask = (md.geometry.bed>=0);
+	%	in=ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/forever_ice.exp',1);
+	%	forever_ice_mask(find(in)) = 1;
+	%	md.results.forever_ice_mask = forever_ice_mask;
+
+		% set premask area to -1
+	%	mask(md.results.forever_ice_mask,:)=-1;
+
+		% step 4: convert icemask to levelset distance
+		distance = zeros(size(mask));
+		for i = 1:size(mask,2)
+			distance(1:end-1,i) = reinitializelevelset(md, mask(1:end-1,i));
+		end
+		distance(end,:) = mask(end,:);
+		% transient spc
+		md.levelset.spclevelset = distance;
+
+		% update boundary conditions
+		md.stressbalance.spcvx=NaN*ones(md.mesh.numberofvertices,1);
+		md.stressbalance.spcvy=NaN*ones(md.mesh.numberofvertices,1);
+		md.stressbalance.spcvz=NaN*ones(md.mesh.numberofvertices,1);
+		md.stressbalance.referential=NaN*ones(md.mesh.numberofvertices,6);
+		md.stressbalance.loadingforce=0*ones(md.mesh.numberofvertices,3);
+		pos=find((md.mask.ice_levelset<0).*(md.mesh.vertexonboundary));
+		md.stressbalance.spcvx(pos)=md.initialization.vx(pos);
+		md.stressbalance.spcvy(pos)=md.initialization.vy(pos);
+		md.stressbalance.spcvz(pos)=0;
+
+		%Clean up
+		savemodel(org,md);
+	end%}}}
+
 	if perform(org, ['Set_icemask_before1972', suffix])% {{{
 		md=loadmodel(org,['Inversion_drag_ISMIP', suffix]);
 
@@ -745,49 +788,6 @@ function varargout=runme(varargin)
 		md.mask.ice_levelset(pos)=1;
 
 		md.geometry.thickness=md.geometry.surface-md.geometry.base;
-		% update boundary conditions
-		md.stressbalance.spcvx=NaN*ones(md.mesh.numberofvertices,1);
-		md.stressbalance.spcvy=NaN*ones(md.mesh.numberofvertices,1);
-		md.stressbalance.spcvz=NaN*ones(md.mesh.numberofvertices,1);
-		md.stressbalance.referential=NaN*ones(md.mesh.numberofvertices,6);
-		md.stressbalance.loadingforce=0*ones(md.mesh.numberofvertices,3);
-		pos=find((md.mask.ice_levelset<0).*(md.mesh.vertexonboundary));
-		md.stressbalance.spcvx(pos)=md.initialization.vx(pos);
-		md.stressbalance.spcvy(pos)=md.initialization.vy(pos);
-		md.stressbalance.spcvz(pos)=0;
-
-		%Clean up
-		savemodel(org,md);
-	end%}}}
-	if perform(org, ['Set_GreenFronts', suffix])% {{{
-		md=loadmodel(org,['Inversion_drag_ISMIP', suffix]);
-
-		% Step 1: set start_time to 2007 and final_time to 2022
-		md.timestepping.final_time = finalTime;
-		md.timestepping.start_time = startTime;
-
-		% Step 2: get observed calving front from Greene's dataset, furthest possible, back to 1972
-		mask = interpMonthlyIceMaskGreene(md.mesh.x, md.mesh.y, [md.timestepping.start_time, md.timestepping.final_time]);
-
-		% step 3: mask out 'forever ice' region
-		% define forever ice region
-		forever_ice_mask = (md.geometry.bed>=0);
-		in=ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/forever_ice.exp',1);
-		forever_ice_mask(find(in)) = 1;
-		md.results.forever_ice_mask = forever_ice_mask;
-
-		% set premask area to -1
-		mask(md.results.forever_ice_mask,:)=-1;
-
-		% step 4: convert icemask to levelset distance
-		distance = zeros(size(mask));
-		for i = 1:size(mask,2)
-			distance(1:end-1,i) = reinitializelevelset(md, mask(1:end-1,i));
-		end
-		distance(end,:) = mask(end,:);
-		% transient spc
-		md.levelset.spclevelset = distance;
-
 		% update boundary conditions
 		md.stressbalance.spcvx=NaN*ones(md.mesh.numberofvertices,1);
 		md.stressbalance.spcvy=NaN*ones(md.mesh.numberofvertices,1);
