@@ -148,6 +148,10 @@ function varargout=runme(varargin)
       cluster=andes('numnodes',1,'cpuspernode',64, 'memory', 32);
       cluster.time = jobTime;
       waitonlock = 0;
+   elseif strcmpi(clustername, 'tjhpc')
+      cluster=tjhpc('numnodes', 1,'cpuspernode', 32);
+      cluster.time = jobTime;
+      waitonlock = 0;
    elseif strcmpi(clustername, 'frontera')
       cluster=frontera('numnodes', 3,'cpuspernode', 56);
       cluster.time = jobTime;
@@ -791,6 +795,89 @@ function varargout=runme(varargin)
 
 		savemodel(org,md);
 	end%}}}
+	if perform(org, ['Transient_', smb_model, suffix]),% {{{
+
+		md=loadmodel(org, ['Set_SMB_', smb_model, suffix]);
+
+		md.initialization.pressure = zeros(md.mesh.numberofvertices,1); %FIXME
+		md.masstransport.spcthickness = NaN(md.mesh.numberofvertices,1); %FIXME
+
+		% Set parameters
+		md.inversion.iscontrol=0;
+		md.timestepping.start_time = startTime;
+		md.timestepping.final_time = finalTime;
+		md.timestepping.time_step  = 0.01;
+		md.settings.output_frequency = 10;
+
+		md.transient.ismovingfront=1;
+		md.transient.isslc = 0;
+		md.transient.isthermal=0;
+		md.transient.isstressbalance=1;
+		md.transient.ismasstransport=1;
+		md.transient.isgroundingline=1;
+		md.groundingline.migration = 'SubelementMigration';
+
+		% calving parameters
+		md.calving = calvingvonmises();
+		md.calving.stress_threshold_floatingice = 200*10^3;
+		md.calving.stress_threshold_groundedice = sigma*10^6; %1: a little much retreat, 0.9,0.95: too much retreat 1.2, 1.1, 1.05,1.02:less retreat:
+
+		% meltingrate
+		timestamps = [md.timestepping.start_time, md.timestepping.final_time];
+		md.frontalforcings.meltingrate=zeros(md.mesh.numberofvertices+1,numel(timestamps));
+		md.frontalforcings.meltingrate(end,:) = timestamps;
+
+		% only set boundary conditions, so that levelset can solve for the calving front
+		md.levelset.stabilization = levelsetStabilization;
+		disp(['  Levelset function uses stabilization ', num2str(md.levelset.stabilization)]);
+		md.levelset.reinit_frequency = levelsetReinit;
+		disp(['  Levelset function reinitializes every ', num2str(md.levelset.reinit_frequency), ' time steps']);
+
+		md.cluster = cluster;
+		md.verbose.solution = 1;
+		md.settings.waitonlock = waitonlock; % do not wait for complete
+		md.miscellaneous.name = [savePath];
+		md.toolkits.DefaultAnalysis=bcgslbjacobioptions();
+
+		md.transient.requested_outputs={'default','IceVolume','IceVolumeAboveFloatation','MaskOceanLevelset','MaskIceLevelset'};
+
+		nan_surf = isnan(md.geometry.surface);
+		md.geometry.surface(nan_surf) = md.geometry.bed(nan_surf);
+		pos = find(md.mask.ice_levelset>0);
+		md.geometry.surface(pos) = md.geometry.base(pos)+10; %Minimum thickness
+
+		md.geometry.thickness = md.geometry.surface - md.geometry.bed;
+		pos=find(md.geometry.thickness<=10);
+		md.geometry.surface(pos) = md.geometry.base(pos)+10; %Minimum thickness
+		md.geometry.thickness = md.geometry.surface - md.geometry.bed;
+		pos = find(max(md.mask.ice_levelset(md.mesh.elements),[],2)>0);
+		md.mask.ice_levelset(md.mesh.elements(pos,:)) = 1;
+		% For the region where surface is NaN, set thickness to small value (consistency requires >0)
+		pos=find((md.mask.ice_levelset<0).*(md.geometry.surface<0));
+		md.mask.ice_levelset(pos)=1;
+		pos=find((md.mask.ice_levelset<0).*(isnan(md.geometry.surface)));
+		md.mask.ice_levelset(pos)=1;
+
+		md.geometry.thickness=md.geometry.surface-md.geometry.base;
+		% update boundary conditions
+		md.stressbalance.spcvx=NaN*ones(md.mesh.numberofvertices,1);
+		md.stressbalance.spcvy=NaN*ones(md.mesh.numberofvertices,1);
+		md.stressbalance.spcvz=NaN*ones(md.mesh.numberofvertices,1);
+		md.stressbalance.referential=NaN*ones(md.mesh.numberofvertices,6);
+		md.stressbalance.loadingforce=0*ones(md.mesh.numberofvertices,3);
+		pos=find((md.mask.ice_levelset<0).*(md.mesh.vertexonboundary));
+		md.stressbalance.spcvx(pos)=md.initialization.vx(pos);
+		md.stressbalance.spcvy(pos)=md.initialization.vy(pos);
+		md.stressbalance.spcvz(pos)=0;
+
+		md=solve(md,'Transient','runtimename',false);
+		savemodel(org,md);
+
+		if ~strcmp(savePath, './')
+			system(['mkdir -p ./Models/', savePath]);
+			system(['cp ', projPath, '/Models/Model_', glacier, '_', org.steps(org.currentstep).string, '.mat ', projPath, '/Models/', savePath, '/Model_', glacier, '_Transient.mat']);
+		end
+	end%}}}
 
 
 
@@ -949,116 +1036,6 @@ function varargout=runme(varargin)
 
 		%Clean up
 		savemodel(org,md);
-	end%}}}
-	if perform(org, ['Transient_', smb_model, suffix]),% {{{
-
-		md=loadmodel(org, ['Set_SMB_', smb_model, suffix]);
-
-		% step 0.1: for Schoof, to make Vmax higher, we need to lower Cmax in front of the terminus
-		if Cmax_before > 0
-			if flagFriction == 0 % Schoof
-				md.friction.Cmax = Cmax_before+0*md.friction.Cmax;
-				if applyWeertman > 0
-					disp('use Weertman C for Schoof')
-					md_w = loadmodel(org, ['Transient_', smb_model, damage_suffix, '_Weertman']);
-					md.friction.C = md_w.friction.C;
-				end
-			end
-		end
-
-		% step 0: change friction coefficients for no ice region
-		if C_before > 0
-			disp([' change friction coefficient in front of the terminus to ', num2str(C_before)])
-			%No friction on PURELY ocean element
-			pos_e = find(min(md.results.icemask_inv(md.mesh.elements),[],2)<0);
-			flags=ones(md.mesh.numberofvertices,1);
-			flags(md.mesh.elements(pos_e,:))=0;
-
-			if flagFriction < 2
-				md.friction.C(find(flags))=C_before;
-			else 
-				md.friction.coefficient(find(flags))=C_before;
-			end
-		end
-
-		md.initialization.pressure = zeros(md.mesh.numberofvertices,1); %FIXME
-		md.masstransport.spcthickness = NaN(md.mesh.numberofvertices,1); %FIXME
-
-		% Set parameters
-		md.inversion.iscontrol=0;
-		md.timestepping.start_time = startTime;
-		md.timestepping.final_time = finalTime;
-		md.timestepping.time_step  = 0.01;
-		md.settings.output_frequency = 10;
-
-		md.transient.ismovingfront=1;
-		md.transient.isslc = 0;
-		md.transient.isthermal=0;
-		md.transient.isstressbalance=1;
-		md.transient.ismasstransport=1;
-		md.transient.isgroundingline=1;
-		md.groundingline.migration = 'SubelementMigration';
-
-		% calving parameters
-		md.calving = calvingvonmises();
-		md.calving.stress_threshold_floatingice = 200*10^3;
-		md.calving.stress_threshold_groundedice = sigma*10^6; %1: a little much retreat, 0.9,0.95: too much retreat 1.2, 1.1, 1.05,1.02:less retreat:
-
-		% meltingrate
-		timestamps = [md.timestepping.start_time, md.timestepping.final_time];
-		md.frontalforcings.meltingrate=zeros(md.mesh.numberofvertices+1,numel(timestamps));
-		md.frontalforcings.meltingrate(end,:) = timestamps;
-
-		% only set boundary conditions, so that levelset can solve for the calving front
-		md.levelset.stabilization = levelsetStabilization;
-		disp(['  Levelset function uses stabilization ', num2str(md.levelset.stabilization)]);
-		md.levelset.reinit_frequency = levelsetReinit;
-		disp(['  Levelset function reinitializes every ', num2str(md.levelset.reinit_frequency), ' time steps']);
-
-		md.cluster = cluster;
-		md.verbose.solution = 1;
-		md.settings.waitonlock = waitonlock; % do not wait for complete
-		md.miscellaneous.name = [savePath];
-		md.toolkits.DefaultAnalysis=bcgslbjacobioptions();
-
-		md.transient.requested_outputs={'default','IceVolume','IceVolumeAboveFloatation','MaskOceanLevelset','MaskIceLevelset'};
-
-		nan_surf = isnan(md.geometry.surface);
-		md.geometry.surface(nan_surf) = md.geometry.bed(nan_surf);
-		pos = find(md.mask.ice_levelset>0);
-		md.geometry.surface(pos) = md.geometry.base(pos)+10; %Minimum thickness
-
-		md.geometry.thickness = md.geometry.surface - md.geometry.bed;
-		pos=find(md.geometry.thickness<=10);
-		md.geometry.surface(pos) = md.geometry.base(pos)+10; %Minimum thickness
-		md.geometry.thickness = md.geometry.surface - md.geometry.bed;
-		pos = find(max(md.mask.ice_levelset(md.mesh.elements),[],2)>0);
-		md.mask.ice_levelset(md.mesh.elements(pos,:)) = 1;
-		% For the region where surface is NaN, set thickness to small value (consistency requires >0)
-		pos=find((md.mask.ice_levelset<0).*(md.geometry.surface<0));
-		md.mask.ice_levelset(pos)=1;
-		pos=find((md.mask.ice_levelset<0).*(isnan(md.geometry.surface)));
-		md.mask.ice_levelset(pos)=1;
-
-		md.geometry.thickness=md.geometry.surface-md.geometry.base;
-		% update boundary conditions
-		md.stressbalance.spcvx=NaN*ones(md.mesh.numberofvertices,1);
-		md.stressbalance.spcvy=NaN*ones(md.mesh.numberofvertices,1);
-		md.stressbalance.spcvz=NaN*ones(md.mesh.numberofvertices,1);
-		md.stressbalance.referential=NaN*ones(md.mesh.numberofvertices,6);
-		md.stressbalance.loadingforce=0*ones(md.mesh.numberofvertices,3);
-		pos=find((md.mask.ice_levelset<0).*(md.mesh.vertexonboundary));
-		md.stressbalance.spcvx(pos)=md.initialization.vx(pos);
-		md.stressbalance.spcvy(pos)=md.initialization.vy(pos);
-		md.stressbalance.spcvz(pos)=0;
-
-		md=solve(md,'Transient','runtimename',false);
-		savemodel(org,md);
-
-		if ~strcmp(savePath, './')
-			system(['mkdir -p ./Models/', savePath]);
-			system(['cp ', projPath, '/Models/Model_', glacier, '_', org.steps(org.currentstep).string, '.mat ', projPath, '/Models/', savePath, '/Model_', glacier, '_Transient.mat']);
-		end
 	end%}}}
 	if perform(org, ['Prepare_for_GNSS'])% {{{
 

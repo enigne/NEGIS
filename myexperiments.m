@@ -2,7 +2,7 @@ clear
 close all
 
 today = datestr(date(), 'yyyymmdd');
-experiments = [8];
+experiments = [9];
 AXIS = [    0.3979    0.5432   -1.2014   -0.9592]*1e6;
 if any(experiments == 1) % exp 1: setup project ISMIP6 temperature to the domain, with shear margin weakening {{{
 	steps = [1,2];
@@ -101,6 +101,23 @@ if any(experiments == 8) % exp 8: set SMB{{{
 				'damageType', 0,...
 				'smb model', SMB{j}, ...
 				'friction', frictions{i});
+		end
+	end
+end %}}}
+if any(experiments == 9) % exp 9: run transient{{{
+	steps = [9]; 
+	frictions = {'Budd'};
+	SMB = {'RACMO'};
+	for i = 1:length(frictions)
+		for j = 1:length(SMB)
+			savePath = [today, '_NEGIS_',SMB{j},'_', frictions{i}];
+			md = runme('steps', steps, ...
+				'startTime',2007,...
+				'cluster name', 'tjhpc',...
+				'damageType', 0,...
+				'smb model', SMB{j}, ...
+				'friction', frictions{i}, ...
+				'savePath', [savePath]);
 		end
 	end
 end %}}}
