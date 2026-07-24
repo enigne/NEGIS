@@ -618,13 +618,13 @@ function varargout=runme(varargin)
 
 		% step 3: mask out 'forever ice' region
 		% define forever ice region
-	%	forever_ice_mask = (md.geometry.bed>=0);
-	%	in=ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/forever_ice.exp',1);
-	%	forever_ice_mask(find(in)) = 1;
-	%	md.results.forever_ice_mask = forever_ice_mask;
+		forever_ice_mask = (md.geometry.bed>=0);
+		in=ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/forever_ice.exp',1);
+		forever_ice_mask(find(in)) = 1;
+		md.results.forever_ice_mask = forever_ice_mask;
 
 		% set premask area to -1
-	%	mask(md.results.forever_ice_mask,:)=-1;
+		mask(md.results.forever_ice_mask,:)=-1;
 
 		% step 4: convert icemask to levelset distance
 		distance = zeros(size(mask));
