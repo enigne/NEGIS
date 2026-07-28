@@ -635,6 +635,9 @@ function varargout=runme(varargin)
 		% transient spc
 		md.levelset.spclevelset = distance;
 
+		% also update md.mask.ice_levelset
+		md.mask.ice_levelset = md.levelset.spclevelset(1:end-1,1);
+
 		% update boundary conditions
 		md.stressbalance.spcvx=NaN*ones(md.mesh.numberofvertices,1);
 		md.stressbalance.spcvy=NaN*ones(md.mesh.numberofvertices,1);
