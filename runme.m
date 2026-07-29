@@ -622,9 +622,15 @@ function varargout=runme(varargin)
 		in=ContourToNodes(md.mesh.x,md.mesh.y,'./Exp/forever_ice.exp',1);
 		forever_ice_mask(find(in)) = 1;
 		md.results.forever_ice_mask = forever_ice_mask;
-
 		% set premask area to -1
 		mask(md.results.forever_ice_mask,:)=-1;
+		% also put large C in the forever ice area
+
+		if flagFriction < 2
+			md.friction.C(find(in)) = max(md.friction.C);
+		else
+			md.friction.coefficient(find(in)) = max(md.friction.coefficient);
+		end
 
 		% step 4: convert icemask to levelset distance
 		distance = zeros(size(mask));
