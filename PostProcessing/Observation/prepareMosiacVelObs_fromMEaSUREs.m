@@ -8,7 +8,7 @@ close all
 tstart = 2007;
 tend = 2022;
 saveflag = 1;
-reloadData = 1;
+reloadData = 0;
 yearly = 1;
 addpath('../../')
 projectsettings;
@@ -36,7 +36,7 @@ if reloadData
 		obsData.Tstart = time;
 		obsData.Tend = time+1;
 	else
-		obsData = interpFromMEaSUREsGeotiff(md.mesh.x,md.mesh.y, tstart, tend, 'glacier', 'Greenland');
+		obsData = interpFromMEaSUREsGeotiff(md.mesh.x,md.mesh.y, tstart, tend, 'glacier', 'Greenland', 'folder','/Users/chenggong/ModelData/');
 	end
 	disp(['  Save obs to ', projPath, 'DATA/VelObs_', timestring, 'Mosaic.mat']);
 	save([projPath, 'DATA/VelObs_' timestring, 'Mosaic.mat'], 'obsData');
@@ -45,7 +45,6 @@ else
 	load([projPath, 'DATA/VelObs_' timestring, 'Mosaic.mat'], 'obsData');
 end
 
-return
 % put data into places
 vxdata = cell2mat({obsData.vx});
 vydata = cell2mat({obsData.vy});
