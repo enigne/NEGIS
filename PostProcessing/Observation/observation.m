@@ -1,10 +1,10 @@
 clear
 
 % step 1: load time dependent vel obs from MEaSUREs, project to the mesh
-%prepareVelObs;
+prepareVelObs;
 
 % step 2: compute averaged observed frontal velocity
-%computeFrontObs;
+computeFrontObs;
 
 % step 3: prepare Monthly and yearly averaged obs
 prepareMosiacVelObs_fromMEaSUREs;
