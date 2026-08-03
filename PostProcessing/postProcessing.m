@@ -5,7 +5,7 @@ projectsettings;
 
 glacier = 'NEGIS';
 downloadData = 1;
-extraPostProc = 0; % set 0 for AD exps
+extraPostProc = 1; % set 0 for AD exps
 saveflag = 1;
 stepName = 'Transient';
 % Setting {{{ 
@@ -51,8 +51,8 @@ else
 end
 %}}}
 if extraPostProc %{{{
-	% Load 10 flowlines {{{
-	load([projPath, 'PostProcessing/Results/flowlines_',glacier,'_50.mat']);
+	% Load flowlines {{{
+	load([projPath, 'PostProcessing/Results/flowlines_',glacier,'_25.mat']);
 	%}}}
 	% load obs data {{{
 	load([projPath, 'PostProcessing/Results/velObs_onmesh.mat']);
