@@ -4,7 +4,7 @@ addpath('../');
 projectsettings;
 
 glacier = 'NEGIS';
-downloadData = 1;
+downloadData = 0;
 extraPostProc = 1; % set 0 for AD exps
 saveflag = 1;
 stepName = 'Transient';

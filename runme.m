@@ -757,7 +757,7 @@ function varargout=runme(varargin)
 		elseif strcmp(smb_model, 'MAR')
 			for i= md.timestepping.start_time: md.timestepping.final_time
 				if (i>=1950) & (i<=2019)
-					filename = ['/totten_1/ModelData/Greenland/MARv3.11-ERA5/MARv3.11-monthly-ERA5-', num2str(i), '.nc'];
+					filename = ['/Users/chenggong/ModelData/Greenland/MARv3.11-ERA5/MARv3.11-monthly-ERA5-', num2str(i), '.nc'];
 					disp(['Loading ' filename]);
 				else
 					disp(['Year ', num2str(i), ' is not coverd in the MAR data, skip for now!'])

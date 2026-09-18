@@ -93,7 +93,7 @@ end %}}}
 if any(experiments == 8) % exp 8: set SMB{{{
 	steps = [8]; % test with the MAR data sets
 	frictions = {'Budd', 'Schoof', 'Weertman'};
-	SMB = {'RACMO'};
+	SMB = {'MAR'};
 	for i = 1:length(frictions)
 		for j = 1:length(SMB)
 			md = runme('steps', steps, ...
@@ -106,8 +106,8 @@ if any(experiments == 8) % exp 8: set SMB{{{
 end %}}}
 if any(experiments == 9) % exp 9: run transient{{{
 	steps = [9]; 
-	frictions = {'Budd'};
-	SMB = {'RACMO'};
+	frictions = {'Budd', 'Schoof', 'Weertman'};
+	SMB = {'RACMO', 'MAR'};
 	for i = 1:length(frictions)
 		for j = 1:length(SMB)
 			savePath = [today, '_NEGIS_',SMB{j},'_', frictions{i}];
