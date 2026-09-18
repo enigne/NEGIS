@@ -6,16 +6,17 @@ projectsettings;
 projPath = ['/Users/chenggong/Research/', glacier, '/'];
 figNamePrefix = [projPath, 'PostProcessing/Figures/test_'];
 
-addObsVel = 1 ; % add obs frontal velocity in the velocity plot
+Id = 0; % Latest experiments
+
+% some detailed settings
 addITS_LIVE = 1; % add ITS_LIVE yearly velocity
+adddH_Abbas = 1; % add ITS_LIVE yearly velocity
+addObsVel = 0 ; % add obs frontal velocity in the velocity plot, not implemented
 startTime = 2011;
 finalTime = 2022;
 dt = 0.01;
 output_frequency = 10;
-
 yearNt = 1/dt/output_frequency;
-
-Id = 0; % Latest experiments
 %% Load data {{{
 addpath([projPath, '/PostProcessing/']);
 [folderList, nameList] = getFolderList(Id);
@@ -28,7 +29,7 @@ yearN = 1/dt/output_frequency;
 
 colorList = {'#377eb8', '#ff7f00', '#4daf4a', '#f781bf', '#a65628', '#984ea3', '#999999', '#e41a1c', '#dede00'};
 Ngroup = 3;
-styleList = {'-','--', ':', '-.'};
+styleList = {'--','-', ':', '-.'};
 gcolor = '#e41a1c';
 
 % Load flowlines
@@ -38,6 +39,11 @@ load([projPath, 'PostProcessing/Results/flowlines_',glacier,'_25.mat']);
 if addITS_LIVE
 	yearly = load([projPath, 'PostProcessing/Results/frontalObs_ITSLIVE.mat']);
 	monthly = load([projPath, 'PostProcessing/Results/flowlines_Obs_Monthly.mat']);
+end
+
+% compare with dHdt map from Khan 2025
+if adddH_Abbas
+	dHdt = load([projPath, 'PostProcessing/Results/dHdt_IceVolume.mat']);
 end
 %}}}
 %% Average behaviors {{{
@@ -53,7 +59,9 @@ for i = 1: Ntrans
 	ylim([-200,50])
 	title('Ice volume (km^3)')
 end
-legend(nameList, 'Interpreter', 'latex', 'location','best')
+subplot(nsub, 1, 1);
+plot(dHdt.dHTime, dHdt.dH_Iv, 'color', [0.5,0.5,0.5], 'LineWidth',1.5)
+legend([nameList, 'Khan2025'], 'Interpreter', 'latex', 'location','best')
 %}}}
 %% averaged along all flowlines {{{
 Nf =  length(flowlineList);
@@ -100,7 +108,5 @@ title('Yearly averaged velocity')
 xlim([startTime, finalTime])
 ylim([0, 2000]);
 
-
 set(gcf,'color','w');
-legend(nameList, 'Interpreter', 'latex', 'location','best')
 %}}}
